@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Progresso do cliente | Super Academia</title>
+    <link rel='stylesheet' src='../public/stylesheets/style.css' />
+    <link rel="shortcut icon" href="/images/favicon.ico" type="image/x-icon">
+
+    <!-- CDN do Bootstrap pro site ficar bonitinho -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/css/bootstrap.min.css" integrity="sha384-Gn5384xqQ1aoWXA+058RXPxPg6fy4IWvTNh0E263XmFcJlSAwiGgFAW/dAiS6JXm" crossorigin="anonymous">
+
+  </head>
+  <body>
+    <div class="container mt-5">
+        <div class="card p-4 shadow">
+            <h2 class="text-center">Progresso de Peso</h2>
+            <div class="d-flex justify-content-center">
+                <table class="table text-center w-auto">
+                    <thead>
+                        <tr>
+                            <th>Peso Inicial</th>
+                            <th>Peso Atual</th>
+                            <th>Variação</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td id="start_weight"></td>
+                            <td id="current_weight"></td>
+                            <td id="change_percent"></td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <canvas id="weight_chart" style="max-height: 300px;"></canvas>
+            <div class="mt-3">
+                <label for="month_weight" class="form-label">Adicionar Peso para um Mês:</label>
+                <input min="2025-03" max="2025-03" value="2025-03" type="month" id="month_input" class="form-control">
+                <input type="number" id="month_weight" class="form-control mt-2" placeholder="Peso em kg">
+                <button class="btn btn-primary mt-2" onclick="add_weight()">Adicionar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- CDN do Chart.js para o gráfico -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+
+        const url = new URL(window.location.href);
+        const token = url.searchParams.get('token'); // token (autorização) do usuário
+        const id = url.searchParams.get('id'); // id do usuário
+        
+        async function lerDB(query) {
+            // lê o banco de dados
+            const res = await fetch('/ler-db', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token, query: query })
+            });
+    
+            return await res.json();
+        }
+
+        async function alterarDB(query) {
+            // altera o banco de dados
+            const res = await fetch('/alterar-db', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token, query: query })
+            });
+
+            return await res.json();
+        }
+        
+        let dados_peso = {
+            labels: [],
+            weights: []
+        };
+        let grafico_peso;
+        
+        // pega a lista de pesos do cliente do banco de dados
+        let param = `SELECT peso FROM Cliente WHERE id = ${id}`;
+        lerDB(param)
+            .then(result => {
+                // transforma os pesos num array
+                let pesos = JSON.parse("[" + result.peso.slice(0, -1) + "]");
+                let labels = [];
+                
+                // adiciona os labels ao gráfico de acordo com a quantidade
+                // de pesos inseridos
+                let i;
+                for (i = 1; i <= pesos.length; i++) {
+                    labels.push("01/0" + (i+1));
+                }
+                document.getElementById('month_input').min = "2025-0" + (i+1);
+                document.getElementById('month_input').value = "2025-0" + (i+1);
+                document.getElementById('month_input').max = document.getElementById('month_input').min;
+                
+                dados_peso = {
+                    labels: labels,
+                    weights: pesos
+                };
+                
+                // gráfico feito com o framework Chart.js
+                const ctx = document.getElementById('weight_chart').getContext('2d');
+                grafico_peso = new Chart(ctx, {
+                    type: 'line', // tipo do gráfico
+                    data: {
+                        labels: dados_peso.labels, // rótulos
+                        datasets: [{
+                            label: 'Peso (kgs)',
+                            data: dados_peso.weights,
+                            borderColor: 'orange',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.4
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: false
+                            }
+                        }
+                    }
+                });
+            })
+            .catch(error => {
+                console.error("Erro:", error);
+            });
+
+        // função para adicionar um novo peso
+        function add_weight() {
+
+            // mês inserido
+            let month = document.getElementById('month_input').value;
+
+            // se o mês for mais do que setembro, impedir adição (evita bugs)
+            if (month.slice(0, month.length - 1) == "9") {month = false;}
+
+            // peso a ser adicionado
+            const weight = parseFloat(document.getElementById('month_weight').value);
+            
+            // se peso e mês existerem e peso entre 0 e 500:
+            if (month && weight && (weight > 0 && weight < 500)) {
+
+                // formata o mês para o padrão do gráfico
+                const formatted_month = '01/' + month.split('-')[1];
+
+                // atualiza o gráfico
+                dados_peso.labels.push(formatted_month);
+                dados_peso.weights.push(weight);
+                grafico_peso.update();
+
+                // atualiza o mês atual nos inputs
+                document.getElementById('month_input').min = month.slice(0, month.length - 1) + (parseInt(month[month.length - 1]) + 1);
+                document.getElementById('month_input').max = document.getElementById('month_input').min;
+                document.getElementById('month_input').value = month.slice(0, month.length - 1) + (parseInt(month[month.length - 1]) + 1);
+
+                // atualiza o banco de dados com o novo peso adicionado
+                let copyArr = [...dados_peso.weights];
+                const pesosSQL = copyArr.toString();
+                alterarDB(`UPDATE Cliente SET peso = "${pesosSQL}," WHERE id = ${id};`);
+
+            } else {
+                window.alert("Peso/mês inválido!");
+            }
+
+        }
+    </script>
+    
+    <!-- CDN do Bootstrap para o site ficar bonitinho -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
